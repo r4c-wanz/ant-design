@@ -1,11 +1,12 @@
 "use client";
 
-import { SearchOutlined } from "@ant-design/icons";
+import { ExclamationCircleFilled, SearchOutlined } from "@ant-design/icons";
 import { Button, Input, Space, Table } from "antd";
 import type { TableProps } from "antd";
+import { Modal, message } from "antd";
 import { useState } from "react";
 
-interface DataType {
+interface Transaction {
   id: string;
   customer: {
     name: string;
@@ -22,7 +23,9 @@ interface DataType {
   reference: string;
 }
 
-const columns: TableProps<DataType>["columns"] = [
+const getColumns = (
+  onDeleteOne: (record: Transaction) => void,
+): TableProps<Transaction>["columns"] => [
   {
     title: "Transaction ID",
     dataIndex: "id",
@@ -143,7 +146,7 @@ const columns: TableProps<DataType>["columns"] = [
           <Button
             color="danger"
             variant="outlined"
-            onClick={() => alert(record.id)}
+            onClick={() => onDeleteOne(record)}
           >
             Delete
           </Button>
@@ -153,7 +156,7 @@ const columns: TableProps<DataType>["columns"] = [
   },
 ];
 
-const transactions: DataType[] = [
+const transactionsData: Transaction[] = [
   {
     id: "TRX-20260801-001",
     customer: { name: "Andi Pratama", email: "andi.pratama@email.com" },
@@ -287,22 +290,95 @@ const transactions: DataType[] = [
 ];
 
 export default function Transactions() {
+  const [transactions, setTransactions] =
+    useState<Transaction[]>(transactionsData);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [searchText, setSearchText] = useState("");
 
   const rowSelection = {
-    type: "checkbox",
+    type: "checkbox" as const,
     selectedRowKeys,
-    onChange: (keys) => setSelectedRowKeys(keys as React.Key[]),
+    onChange: (keys: React.Key[]) => setSelectedRowKeys(keys as React.Key[]),
   };
 
+  const filteredTransactions = transactions.filter((t) => {
+    const query = searchText.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      t.id.toLowerCase().includes(query) ||
+      t.customer.name.toLowerCase().includes(query) ||
+      t.customer.email.toLowerCase().includes(query)
+    );
+  });
+
   const handleDeleteSelected = () => {
-    const confirmed = window.confirm("Are you sure you want to delete selected transactions?");
-    if (confirmed) {
-      const updatedTransactions = transactions.filter((t) => !selectedRowKeys.includes(t.id));
-      setTransactions(updatedTransactions);
-      setSelectedRowKeys([]);
+    if (selectedRowKeys.length === 0) {
+      message.warning("Please select at least one transaction to delete.");
+      return;
     }
+
+    const selectedTransactions = transactions.filter((t) =>
+      selectedRowKeys.includes(t.id),
+    );
+    const deletable = selectedTransactions.filter(
+      (t) => t.status !== "PENDING",
+    );
+    const nonDeletable = selectedTransactions.filter(
+      (t) => t.status === "PENDING",
+    );
+
+    if (deletable.length === 0) {
+      message.error(
+        "Selected transactions are still PENDING and cannot be deleted.",
+      );
+      return;
+    }
+
+    Modal.confirm({
+      title: "Delete selected transactions?",
+      icon: <ExclamationCircleFilled />,
+      content:
+        nonDeletable.length > 0
+          ? `${deletable.length} transaction(s) will be deleted. ${nonDeletable.length} PENDING transaction(s) will be skipped and cannot be deleted. This action cannot be undone.`
+          : `This will permanently delete ${deletable.length} transaction(s). This action cannot be undone.`,
+      okText: "Delete",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: () => {
+        const deletableIds = deletable.map((t) => t.id);
+        const updatedTransactions = transactions.filter(
+          (t) => !deletableIds.includes(t.id),
+        );
+        setTransactions(updatedTransactions);
+        setSelectedRowKeys([]);
+
+        message.success(`${deletable.length} transaction(s) deleted.`);
+        if (nonDeletable.length > 0) {
+          message.error(
+            `${nonDeletable.length} PENDING transaction(s) could not be deleted.`,
+          );
+        }
+      },
+    });
   };
+
+  const handleDeleteOne = (record: Transaction) => {
+    Modal.confirm({
+      title: "Delete this transaction?",
+      icon: <ExclamationCircleFilled />,
+      content: `This will permanently delete transaction ${record.id}. This action cannot be undone.`,
+      okText: "Delete",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: () => {
+        setTransactions((prev) => prev.filter((t) => t.id !== record.id));
+        setSelectedRowKeys((prev) => prev.filter((key) => key !== record.id));
+        message.success(`Transaction ${record.id} deleted.`);
+      },
+    });
+  };
+
+  const columns = getColumns(handleDeleteOne);
 
   return (
     <div>
@@ -337,6 +413,9 @@ export default function Transactions() {
                 className="font-semibold"
                 placeholder="Search by ID, name, or email"
                 prefix={<SearchOutlined />}
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                allowClear
               />
             </div>
             {selectedRowKeys.length > 0 && (
@@ -351,11 +430,12 @@ export default function Transactions() {
           </div>
         </div>
         <div className="mt-5 table w-full">
-          <Table<DataType>
+          <Table<Transaction>
             rowKey="id"
             rowSelection={rowSelection}
-            dataSource={transactions}
+            dataSource={filteredTransactions}
             columns={columns}
+            pagination={{ pageSize: 5 }}
             className="rounded-lg border border-[#E4E7EC] bg-white"
           />
         </div>
